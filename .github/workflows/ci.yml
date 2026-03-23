@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - README.md
+    paths:
+      - 'src/**'
+      - 'benchmark/**'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - README.md
+    paths:
+      - 'src/**'
+      - 'benchmark/**'
   workflow_dispatch:
 
 permissions:
