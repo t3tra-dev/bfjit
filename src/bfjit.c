@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include "bfjit.h"
 
 #include <stdint.h>
