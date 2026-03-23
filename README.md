@@ -9,21 +9,21 @@ The benchmark results comparing it to unoptimized Brainf\_ck implementations wri
 <!-- benchmark:start -->
 ```text
 Benchmark 1: ./build/bfjit ./examples/hanoi.b.txt
-  Time (mean ± σ):     147.6 ms ±   5.2 ms    [User: 140.1 ms, System: 5.5 ms]
-  Range (min … max):   144.3 ms … 161.8 ms    10 runs
+  Time (mean ± σ):     408.6 ms ±   2.1 ms    [User: 388.3 ms, System: 20.0 ms]
+  Range (min … max):   406.2 ms … 413.3 ms    10 runs
  
 Benchmark 2: ./build/simple_c ./examples/hanoi.b.txt
-  Time (mean ± σ):      7.497 s ±  0.108 s    [User: 7.447 s, System: 0.033 s]
-  Range (min … max):    7.382 s …  7.660 s    10 runs
+  Time (mean ± σ):     12.725 s ±  0.744 s    [User: 12.722 s, System: 0.001 s]
+  Range (min … max):   11.546 s … 13.447 s    10 runs
  
 Benchmark 3: bun ./benchmark/bf.js ./examples/hanoi.b.txt
-  Time (mean ± σ):     12.688 s ±  0.304 s    [User: 12.608 s, System: 0.065 s]
-  Range (min … max):   12.110 s … 13.021 s    10 runs
+  Time (mean ± σ):     25.439 s ±  0.544 s    [User: 25.448 s, System: 0.028 s]
+  Range (min … max):   24.405 s … 25.716 s    10 runs
  
 Summary
   ./build/bfjit ./examples/hanoi.b.txt ran
-   50.80 ± 1.94 times faster than ./build/simple_c ./examples/hanoi.b.txt
-   85.99 ± 3.68 times faster than bun ./benchmark/bf.js ./examples/hanoi.b.txt
+   31.14 ± 1.83 times faster than ./build/simple_c ./examples/hanoi.b.txt
+   62.26 ± 1.37 times faster than bun ./benchmark/bf.js ./examples/hanoi.b.txt
 ```
 <!-- benchmark:end -->
 
