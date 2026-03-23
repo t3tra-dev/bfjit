@@ -1,0 +1,56 @@
+name: Benchmark
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake llvm-dev
+          wget https://github.com/sharkdp/hyperfine/releases/download/v1.20.0/hyperfine_1.20.0_amd64.deb
+          sudo dpkg -i hyperfine_1.20.0_amd64.deb
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          clang ./benchmark/bf.c -o build/simple_c -O3
+
+      - name: Run benchmarks
+        run: |
+          set -euo pipefail
+
+          result_file="$(mktemp)"
+          block_file="$(mktemp)"
+          tmp_readme="$(mktemp)"
+          trap 'rm -f "$result_file" "$block_file" "$tmp_readme"' EXIT
+
+          hyperfine -w 1 -r 10 -N \
+            "./build/bfjit ./examples/hanoi.b.txt" \
+            "./build/simple_c ./examples/hanoi.b.txt" \
+            "bun ./benchmark/bf.js ./examples/hanoi.b.txt" \
+            | tee "$result_file"
+
+          {
+            printf '```text\n'
+            cat "$result_file"
+            printf '```\n'
+          } > "$block_file"
+
+          sed '/<!-- benchmark:start -->/,/<!-- benchmark:end -->/{//!d;}' README.md \
+            | sed "/<!-- benchmark:start -->/r $block_file" \
+            > "$tmp_readme"
+
+          mv "$tmp_readme" README.md
+
+          echo "Updated README benchmark block:"
+          sed -n '/<!-- benchmark:start -->/,/<!-- benchmark:end -->/p' README.md

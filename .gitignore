@@ -1,0 +1,4 @@
+.cache/
+build/
+.DS_Store
+Thumbs.db
