@@ -13,6 +13,8 @@ typedef enum bf_ir_kind {
     BF_IR_OUTPUT,
     BF_IR_LOOP,
     BF_IR_SET_ZERO,
+    BF_IR_SET_CONST,
+    BF_IR_MULTI_ZERO,
     BF_IR_SCAN,
     BF_IR_MULTIPLY_LOOP
 } bf_ir_kind;

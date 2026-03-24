@@ -52,10 +52,13 @@ target_link_libraries(llvm-shared INTERFACE ${LLVM_SHARED_LIBRARIES})
 
 add_library(libbfjit STATIC
 	include/bfjit.h
+    include/bfjit_internal.h
     include/bflexer.h
     include/bfopt.h
     include/bfparser.h
 	src/bfjit.c
+    src/bfjit_codegen.c
+    src/bfjit_runtime.c
     src/bflexer.c
     src/bfopt.c
     src/bfparser.c

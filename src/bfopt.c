@@ -1,6 +1,7 @@
 #include "bfopt.h"
 
 #include <stdlib.h>
+#include <string.h>
 
 static void bf_opt_set_zero(bf_ir_node *node) {
     const bf_ir_block *body;
@@ -163,6 +164,261 @@ static void bf_try_recognize_multiply_loop(bf_ir_node *node) {
     node->term_count = term_count;
 }
 
+static void bf_opt_fold_set_const(bf_ir_block *block) {
+    size_t index;
+
+    for (index = 0; index + 1 < block->count; ++index) {
+        bf_ir_node *node;
+        bf_ir_node *next;
+
+        node = &block->nodes[index];
+        next = &block->nodes[index + 1];
+
+        if (node->kind == BF_IR_SET_ZERO && next->kind == BF_IR_ADD_DATA) {
+            node->kind = BF_IR_SET_CONST;
+            node->arg = next->arg;
+            memmove(&block->nodes[index + 1], &block->nodes[index + 2],
+                    (block->count - index - 2) * sizeof(*block->nodes));
+            block->count -= 1;
+            index -= (index > 0);
+        } else if (node->kind == BF_IR_SET_CONST &&
+                   next->kind == BF_IR_ADD_DATA) {
+            node->arg += next->arg;
+            if (node->arg == 0) {
+                node->kind = BF_IR_SET_ZERO;
+            }
+            memmove(&block->nodes[index + 1], &block->nodes[index + 2],
+                    (block->count - index - 2) * sizeof(*block->nodes));
+            block->count -= 1;
+            index -= (index > 0);
+        }
+    }
+}
+
+typedef struct bf_store_record {
+    int offset;
+    size_t node_index;
+} bf_store_record;
+
+static size_t bf_find_store_record(const bf_store_record *records,
+                                   size_t record_count, int offset) {
+    size_t index;
+
+    for (index = 0; index < record_count; ++index) {
+        if (records[index].offset == offset) {
+            return index;
+        }
+    }
+
+    return record_count;
+}
+
+static void bf_drop_store_record(bf_store_record *records, size_t *record_count,
+                                 int offset) {
+    size_t record_index;
+
+    record_index = bf_find_store_record(records, *record_count, offset);
+    if (record_index == *record_count) {
+        return;
+    }
+
+    memmove(&records[record_index], &records[record_index + 1],
+            (*record_count - record_index - 1) * sizeof(*records));
+    *record_count -= 1;
+}
+
+static void bf_kill_prior_store(bf_store_record *records, size_t *record_count,
+                                int offset, unsigned char *remove_mask) {
+    size_t record_index;
+
+    record_index = bf_find_store_record(records, *record_count, offset);
+    if (record_index == *record_count) {
+        return;
+    }
+
+    remove_mask[records[record_index].node_index] = 1;
+    memmove(&records[record_index], &records[record_index + 1],
+            (*record_count - record_index - 1) * sizeof(*records));
+    *record_count -= 1;
+}
+
+static void bf_record_store(bf_store_record *records, size_t *record_count,
+                            int offset, size_t node_index,
+                            unsigned char *remove_mask) {
+    size_t record_index;
+
+    record_index = bf_find_store_record(records, *record_count, offset);
+    if (record_index < *record_count) {
+        remove_mask[records[record_index].node_index] = 1;
+        records[record_index].node_index = node_index;
+        return;
+    }
+
+    records[*record_count].offset = offset;
+    records[*record_count].node_index = node_index;
+    *record_count += 1;
+}
+
+static void bf_clear_store_records(size_t *record_count) { *record_count = 0; }
+
+static void bf_opt_eliminate_dead_stores(bf_ir_block *block) {
+    bf_store_record *records;
+    unsigned char *remove_mask;
+    size_t record_count;
+    size_t index;
+    size_t write_index;
+    int current_offset;
+    int changed;
+
+    if (block->count < 2) {
+        return;
+    }
+
+    records = malloc(block->count * sizeof(*records));
+    remove_mask = calloc(block->count, sizeof(*remove_mask));
+    if (records == NULL || remove_mask == NULL) {
+        free(records);
+        free(remove_mask);
+        return;
+    }
+
+    record_count = 0;
+    current_offset = 0;
+    changed = 0;
+
+    for (index = 0; index < block->count; ++index) {
+        bf_ir_node *node;
+
+        node = &block->nodes[index];
+        switch (node->kind) {
+        case BF_IR_ADD_PTR:
+            current_offset += node->arg;
+            break;
+        case BF_IR_SET_ZERO:
+        case BF_IR_SET_CONST:
+            bf_record_store(records, &record_count, current_offset, index,
+                            remove_mask);
+            break;
+        case BF_IR_INPUT:
+            bf_kill_prior_store(records, &record_count, current_offset,
+                                remove_mask);
+            break;
+        case BF_IR_ADD_DATA:
+        case BF_IR_OUTPUT:
+            bf_drop_store_record(records, &record_count, current_offset);
+            break;
+        case BF_IR_MULTI_ZERO: {
+            size_t term_index;
+
+            for (term_index = 0; term_index < node->term_count; ++term_index) {
+                bf_kill_prior_store(records, &record_count,
+                                    current_offset +
+                                        node->terms[term_index].offset,
+                                    remove_mask);
+            }
+            current_offset += node->arg;
+            break;
+        }
+        case BF_IR_LOOP:
+        case BF_IR_SCAN:
+        case BF_IR_MULTIPLY_LOOP:
+            bf_clear_store_records(&record_count);
+            break;
+        default:
+            bf_clear_store_records(&record_count);
+            break;
+        }
+    }
+
+    for (index = 0; index < block->count; ++index) {
+        if (remove_mask[index] != 0) {
+            changed = 1;
+            break;
+        }
+    }
+
+    if (changed) {
+        write_index = 0;
+        for (index = 0; index < block->count; ++index) {
+            if (remove_mask[index] == 0) {
+                if (write_index != index) {
+                    block->nodes[write_index] = block->nodes[index];
+                }
+                write_index += 1;
+            }
+        }
+        block->count = write_index;
+    }
+
+    free(records);
+    free(remove_mask);
+}
+
+static void bf_try_fold_multi_zero(bf_ir_block *block) {
+    size_t index;
+
+    for (index = 0; index < block->count; ++index) {
+        size_t scan_index;
+        size_t zero_count;
+        int current_offset;
+        bf_multiply_term *offsets;
+
+        if (block->nodes[index].kind != BF_IR_SET_ZERO) {
+            continue;
+        }
+
+        zero_count = 1;
+        current_offset = 0;
+        scan_index = index + 1;
+        while (scan_index + 1 < block->count &&
+               block->nodes[scan_index].kind == BF_IR_ADD_PTR &&
+               block->nodes[scan_index + 1].kind == BF_IR_SET_ZERO) {
+            current_offset += block->nodes[scan_index].arg;
+            zero_count += 1;
+            scan_index += 2;
+        }
+
+        if (zero_count < 2) {
+            continue;
+        }
+
+        offsets = malloc(zero_count * sizeof(*offsets));
+        if (offsets == NULL) {
+            continue;
+        }
+
+        offsets[0].offset = 0;
+        offsets[0].factor = 0;
+        current_offset = 0;
+        zero_count = 1;
+        scan_index = index + 1;
+        while (scan_index + 1 < block->count &&
+               block->nodes[scan_index].kind == BF_IR_ADD_PTR &&
+               block->nodes[scan_index + 1].kind == BF_IR_SET_ZERO) {
+            current_offset += block->nodes[scan_index].arg;
+            offsets[zero_count].offset = current_offset;
+            offsets[zero_count].factor = 0;
+            zero_count += 1;
+            scan_index += 2;
+        }
+
+        if (scan_index < block->count &&
+            block->nodes[scan_index].kind == BF_IR_ADD_PTR) {
+            current_offset += block->nodes[scan_index].arg;
+            scan_index += 1;
+        }
+
+        block->nodes[index].kind = BF_IR_MULTI_ZERO;
+        block->nodes[index].arg = current_offset;
+        block->nodes[index].terms = offsets;
+        block->nodes[index].term_count = zero_count;
+
+        memmove(&block->nodes[index + 1], &block->nodes[scan_index],
+                (block->count - scan_index) * sizeof(*block->nodes));
+        block->count -= (scan_index - index - 1);
+    }
+}
+
 static void bf_opt_block(bf_ir_block *block) {
     size_t i;
 
@@ -173,6 +429,11 @@ static void bf_opt_block(bf_ir_block *block) {
             bf_try_recognize_multiply_loop(&block->nodes[i]);
         }
     }
+
+    bf_opt_fold_set_const(block);
+    bf_opt_eliminate_dead_stores(block);
+    bf_try_fold_multi_zero(block);
+    bf_opt_eliminate_dead_stores(block);
 }
 
 void bf_opt_program(bf_program *program) {

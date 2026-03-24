@@ -52,7 +52,8 @@ void bf_ir_block_dispose(bf_ir_block *block) {
         if (block->nodes[index].kind == BF_IR_LOOP) {
             bf_ir_block_dispose(&block->nodes[index].body);
         }
-        if (block->nodes[index].kind == BF_IR_MULTIPLY_LOOP) {
+        if (block->nodes[index].kind == BF_IR_MULTIPLY_LOOP ||
+            block->nodes[index].kind == BF_IR_MULTI_ZERO) {
             free(block->nodes[index].terms);
         }
     }
@@ -297,6 +298,10 @@ const char *bf_ir_kind_name(bf_ir_kind kind) {
         return "loop";
     case BF_IR_SET_ZERO:
         return "set_zero";
+    case BF_IR_SET_CONST:
+        return "set_const";
+    case BF_IR_MULTI_ZERO:
+        return "multi_zero";
     case BF_IR_SCAN:
         return "scan";
     case BF_IR_MULTIPLY_LOOP:
